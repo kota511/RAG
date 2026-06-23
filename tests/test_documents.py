@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
-from app.main import app, chunk_text, extract_text_from_bytes
+from app.main import app
+from app.documents import chunk_text, extract_text_from_bytes
 
 client = TestClient(app)
 
