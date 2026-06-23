@@ -1,6 +1,8 @@
+from uuid import UUID
+
 from fastapi.testclient import TestClient
 from app.main import app
-from app.documents import chunk_text, extract_text_from_bytes
+from app.documents import chunk_text, extract_text_from_bytes, generate_document_id
 
 client = TestClient(app)
 
@@ -16,9 +18,12 @@ def test_upload_returns_metadata() -> None:
         "/documents",
         files={"file": ("notes.txt", "rag test", "text/plain")},
     )
+    response_body = response.json()
 
     assert response.status_code == 200
-    assert response.json() == {
+    assert isinstance(response_body["document_id"], str)
+    UUID(response_body["document_id"])
+    assert response_body == {
         "filename": "notes.txt",
         "content_type": "text/plain",
         "size_bytes": 8,
@@ -26,7 +31,21 @@ def test_upload_returns_metadata() -> None:
         "character_count": 8,
         "chunk_count": 1,
         "chunks": ["rag test"],
+        "document_id": response_body["document_id"],
     }
+
+
+def test_fetches_uploaded_document() -> None:
+    upload_response = client.post(
+        "/documents",
+        files={"file": ("notes.txt", "rag test", "text/plain")},
+    )
+    document_id = upload_response.json()["document_id"]
+
+    fetch_response = client.get(f"/documents/{document_id}")
+
+    assert fetch_response.status_code == 200
+    assert fetch_response.json() == upload_response.json()
 
 
 def test_upload_rejects_unsupported_type() -> None:
@@ -54,3 +73,17 @@ def test_chunks_text() -> None:
     chunks = chunk_text(text, chunk_size=10)
 
     assert chunks == ["testing if", " this will", " chunk pro", "perly"]
+
+
+def test_generates_document_id() -> None:
+    document_id = generate_document_id()
+
+    assert isinstance(document_id, str)
+    UUID(document_id)
+
+
+def test_fetch_rejects_missing_document() -> None:
+    response = client.get("/documents/nonexistent-id")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Document not found"}
