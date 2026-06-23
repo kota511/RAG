@@ -1,9 +1,20 @@
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from app.documents import chunk_text, extract_text_from_bytes, generate_document_id
+from app.documents import (
+    chunk_text,
+    extract_text_from_bytes,
+    generate_chunk_id,
+    generate_document_id,
+)
 
 app = FastAPI(title="RAG API")
+
+
+class DocumentChunk(BaseModel):
+    chunk_index: int
+    text: str
+    chunk_id: str
 
 
 class DocumentUploadResponse(BaseModel):
@@ -13,7 +24,7 @@ class DocumentUploadResponse(BaseModel):
     text: str
     character_count: int
     chunk_count: int
-    chunks: list[str]
+    chunks: list[DocumentChunk]
     document_id: str
 
 
@@ -35,9 +46,16 @@ async def upload_document(file: UploadFile = File(...)) -> DocumentUploadRespons
     if len(text) == 0:
         raise HTTPException(status_code=400, detail="File is empty")
 
-    chunks = chunk_text(text)
-
     document_id = generate_document_id()
+    chunks = [
+        DocumentChunk(
+            chunk_id=generate_chunk_id(document_id, index),
+            chunk_index=index,
+            text=chunk,
+        )
+        for index, chunk in enumerate(chunk_text(text))
+    ]
+
     response = DocumentUploadResponse(
         document_id=document_id,
         filename=file.filename,

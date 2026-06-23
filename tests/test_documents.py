@@ -2,7 +2,12 @@ from uuid import UUID
 
 from fastapi.testclient import TestClient
 from app.main import app
-from app.documents import chunk_text, extract_text_from_bytes, generate_document_id
+from app.documents import (
+    chunk_text,
+    extract_text_from_bytes,
+    generate_chunk_id,
+    generate_document_id,
+)
 
 client = TestClient(app)
 
@@ -30,7 +35,13 @@ def test_upload_returns_metadata() -> None:
         "text": "rag test",
         "character_count": 8,
         "chunk_count": 1,
-        "chunks": ["rag test"],
+        "chunks": [
+            {
+                "chunk_id": f"{response_body['document_id']}:0",
+                "chunk_index": 0,
+                "text": "rag test",
+            }
+        ],
         "document_id": response_body["document_id"],
     }
 
@@ -80,6 +91,12 @@ def test_generates_document_id() -> None:
 
     assert isinstance(document_id, str)
     UUID(document_id)
+
+
+def test_generates_chunk_id() -> None:
+    chunk_id = generate_chunk_id("document-123", 0)
+
+    assert chunk_id == "document-123:0"
 
 
 def test_fetch_rejects_missing_document() -> None:
