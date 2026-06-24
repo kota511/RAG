@@ -9,22 +9,98 @@ from app.documents import (
     generate_chunk_id,
     generate_document_id,
 )
-from app.main import app, stored_documents
+from app.main import (
+    app,
+    stored_documents,
+    stored_embeddings,
+)
 
 client = TestClient(app)
 
 
+def test_health_check_returns_ok() -> None:
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def fake_embeddings(texts: list[str]) -> list[list[float]]:
+    return [[1.0, 0.0] for _ in texts]
+
+
 @pytest.fixture(autouse=True)
-def clear_stored_documents() -> None:
+def reset_application_state(
+    monkeypatch: pytest.MonkeyPatch,
+):
     stored_documents.clear()
+    stored_embeddings.clear()
+    monkeypatch.setattr("app.main.create_embeddings", fake_embeddings)
+
     yield
+
     stored_documents.clear()
+    stored_embeddings.clear()
+
+
+def semantic_test_embeddings(texts: list[str]) -> list[list[float]]:
+    vectors = {
+        "Grounded answers include citations.": [1.0, 0.0],
+        "Deployment uses containers.": [0.0, 1.0],
+        "how are sources referenced": [1.0, 0.0],
+    }
+    return [vectors[text] for text in texts]
 
 
 def test_extracts_text() -> None:
-    text = extract_text_from_bytes(b"rag test")
+    assert extract_text_from_bytes(b"rag test") == "rag test"
 
-    assert text == "rag test"
+
+def test_chunks_text() -> None:
+    chunks = chunk_text(
+        "testing if this will chunk properly",
+        chunk_size=10,
+        chunk_overlap=0,
+    )
+
+    assert chunks == ["testing if", " this will", " chunk pro", "perly"]
+
+
+def test_chunks_text_with_overlap() -> None:
+    chunks = chunk_text("abcdefghij12345", chunk_size=10, chunk_overlap=3)
+
+    assert chunks == ["abcdefghij", "hij12345"]
+
+
+@pytest.mark.parametrize(
+    ("chunk_size", "chunk_overlap"),
+    [
+        (0, 0),
+        (10, -1),
+        (10, 10),
+    ],
+)
+def test_rejects_invalid_chunk_settings(
+    chunk_size: int,
+    chunk_overlap: int,
+) -> None:
+    with pytest.raises(ValueError):
+        chunk_text(
+            "some text",
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+        )
+
+
+def test_generates_document_id() -> None:
+    document_id = generate_document_id()
+
+    assert isinstance(document_id, str)
+    UUID(document_id)
+
+
+def test_generates_chunk_id() -> None:
+    assert generate_chunk_id("document-123", 0) == "document-123:0"
 
 
 def test_upload_returns_metadata() -> None:
@@ -35,8 +111,6 @@ def test_upload_returns_metadata() -> None:
     response_body = response.json()
 
     assert response.status_code == 200
-    assert isinstance(response_body["document_id"], str)
-    UUID(response_body["document_id"])
     assert response_body == {
         "filename": "notes.txt",
         "content_type": "text/plain",
@@ -88,39 +162,6 @@ def test_upload_rejects_empty_file() -> None:
     assert response.json() == {"detail": "File is empty"}
 
 
-def test_chunks_text() -> None:
-    text = "testing if this will chunk properly"
-    chunks = chunk_text(text, chunk_size=10, chunk_overlap=0)
-
-    assert chunks == ["testing if", " this will", " chunk pro", "perly"]
-
-
-def test_chunks_text_with_overlap() -> None:
-    chunks = chunk_text("abcdefghij12345", chunk_size=10, chunk_overlap=3)
-
-    assert chunks == ["abcdefghij", "hij12345"]
-
-
-@pytest.mark.parametrize(
-    ("chunk_size", "chunk_overlap"),
-    [
-        (0, 0),
-        (10, -1),
-        (10, 10),
-    ],
-)
-def test_rejects_invalid_chunk_settings(
-    chunk_size: int,
-    chunk_overlap: int,
-) -> None:
-    with pytest.raises(ValueError):
-        chunk_text(
-            "some text",
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
-        )
-
-
 def test_upload_uses_overlapping_chunks() -> None:
     text = "a" * 100 + "b" * 20
 
@@ -135,19 +176,6 @@ def test_upload_uses_overlapping_chunks() -> None:
         "a" * 100,
         "a" * 20 + "b" * 20,
     ]
-
-
-def test_generates_document_id() -> None:
-    document_id = generate_document_id()
-
-    assert isinstance(document_id, str)
-    UUID(document_id)
-
-
-def test_generates_chunk_id() -> None:
-    chunk_id = generate_chunk_id("document-123", 0)
-
-    assert chunk_id == "document-123:0"
 
 
 def test_fetch_rejects_missing_document() -> None:
@@ -226,7 +254,7 @@ def test_search_chunks_case_insensitively() -> None:
             "chunk_id": uploaded_document["chunks"][0]["chunk_id"],
             "chunk_index": 0,
             "text": "answers use citations",
-            "score": 1,
+            "score": 1.0,
         }
     ]
 
@@ -268,4 +296,46 @@ def test_search_ranks_and_limits_results() -> None:
     assert response.status_code == 200
     assert len(results) == 1
     assert results[0]["document_id"] == first["document_id"]
-    assert results[0]["score"] == 2
+    assert results[0]["score"] == 2.0
+
+
+def test_semantic_search_ranks_related_chunk_first(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.main.create_embeddings", semantic_test_embeddings)
+    citations_document = client.post(
+        "/documents",
+        files={
+            "file": (
+                "citations.txt",
+                "Grounded answers include citations.",
+                "text/plain",
+            )
+        },
+    ).json()
+    client.post(
+        "/documents",
+        files={"file": ("deployment.txt", "Deployment uses containers.", "text/plain")},
+    )
+
+    response = client.get(
+        "/semantic-search",
+        params={"query": "how are sources referenced", "limit": 1},
+    )
+    results = response.json()
+
+    assert response.status_code == 200
+    assert len(results) == 1
+    assert results[0]["document_id"] == citations_document["document_id"]
+
+
+def test_deleting_document_removes_embeddings() -> None:
+    uploaded = client.post(
+        "/documents",
+        files={"file": ("notes.txt", "rag test", "text/plain")},
+    ).json()
+    chunk_id = uploaded["chunks"][0]["chunk_id"]
+
+    client.delete(f"/documents/{uploaded['document_id']}")
+
+    assert chunk_id not in stored_embeddings

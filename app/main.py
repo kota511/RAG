@@ -8,6 +8,7 @@ from app.documents import (
     generate_chunk_id,
     generate_document_id,
 )
+from app.embeddings import cosine_similarity, create_embeddings
 
 app = FastAPI(title="RAG API")
 
@@ -29,12 +30,12 @@ class DocumentUploadResponse(BaseModel):
     document_id: str
 
 
-class DocumentSearchResponse(BaseModel):
+class SearchResult(BaseModel):
     document_id: str
     chunk_id: str
     chunk_index: int
     text: str
-    score: int
+    score: float
 
 
 class DocumentSummary(BaseModel):
@@ -47,6 +48,7 @@ class DocumentSummary(BaseModel):
 
 
 stored_documents: dict[str, DocumentUploadResponse] = {}
+stored_embeddings: dict[str, list[float]] = {}
 
 
 @app.get("/health")
@@ -87,7 +89,15 @@ async def upload_document(file: UploadFile = File(...)) -> DocumentUploadRespons
         chunks=chunks,
     )
 
+    embeddings = create_embeddings([chunk.text for chunk in chunks])
+
     stored_documents[document_id] = response
+    stored_embeddings.update(
+        {
+            chunk.chunk_id: embedding
+            for chunk, embedding in zip(chunks, embeddings)
+        }
+    )
     return response
 
 
@@ -108,8 +118,12 @@ def list_documents() -> list[DocumentSummary]:
 
 @app.delete("/documents/{document_id}", status_code=204)
 def delete_document(document_id: str) -> Response:
-    if document_id not in stored_documents:
+    document = stored_documents.get(document_id)
+    if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
+
+    for chunk in document.chunks:
+        stored_embeddings.pop(chunk.chunk_id, None)
 
     del stored_documents[document_id]
     return Response(status_code=204)
@@ -128,8 +142,8 @@ def get_document(document_id: str) -> DocumentUploadResponse:
 def search_documents(
     query: str = Query(min_length=1),
     limit: int = Query(default=5, ge=1, le=20),
-) -> list[DocumentSearchResponse]:
-    results: list[DocumentSearchResponse] = []
+) -> list[SearchResult]:
+    results: list[SearchResult] = []
 
     for document in stored_documents.values():
         for chunk in document.chunks:
@@ -138,7 +152,35 @@ def search_documents(
                 continue
 
             results.append(
-                DocumentSearchResponse(
+                SearchResult(
+                    document_id=document.document_id,
+                    chunk_id=chunk.chunk_id,
+                    chunk_index=chunk.chunk_index,
+                    text=chunk.text,
+                    score=float(score),
+                )
+            )
+
+    results.sort(key=lambda result: result.score, reverse=True)
+    return results[:limit]
+
+
+@app.get("/semantic-search")
+def semantic_search(
+    query: str = Query(min_length=1),
+    limit: int = Query(default=5, ge=1, le=20),
+) -> list[SearchResult]:
+    query_embedding = create_embeddings([query])[0]
+    results: list[SearchResult] = []
+
+    for document in stored_documents.values():
+        for chunk in document.chunks:
+            score = cosine_similarity(
+                query_embedding,
+                stored_embeddings[chunk.chunk_id],
+            )
+            results.append(
+                SearchResult(
                     document_id=document.document_id,
                     chunk_id=chunk.chunk_id,
                     chunk_index=chunk.chunk_index,
