@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
 from app.documents import (
@@ -26,6 +26,13 @@ class DocumentUploadResponse(BaseModel):
     chunk_count: int
     chunks: list[DocumentChunk]
     document_id: str
+
+
+class DocumentSearchResponse(BaseModel):
+    document_id: str
+    chunk_id: str
+    chunk_index: int
+    text: str
 
 
 stored_documents: dict[str, DocumentUploadResponse] = {}
@@ -78,3 +85,23 @@ def get_document(document_id: str) -> DocumentUploadResponse:
         raise HTTPException(status_code=404, detail="Document not found")
 
     return document
+
+
+@app.get("/search")
+def search_documents(query: str = Query(min_length=1)) -> list[DocumentSearchResponse]:
+    results: list[DocumentSearchResponse] = []
+    normalized_query = query.casefold()
+
+    for document in stored_documents.values():
+        for chunk in document.chunks:
+            if normalized_query in chunk.text.casefold():
+                results.append(
+                    DocumentSearchResponse(
+                        document_id=document.document_id,
+                        chunk_id=chunk.chunk_id,
+                        chunk_index=chunk.chunk_index,
+                        text=chunk.text,
+                    )
+                )
+
+    return results

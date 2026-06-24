@@ -104,3 +104,33 @@ def test_fetch_rejects_missing_document() -> None:
 
     assert response.status_code == 404
     assert response.json() == {"detail": "Document not found"}
+
+
+def test_search_chunks_case_insensitively() -> None:
+    upload_response = client.post(
+        "/documents",
+        files={"file": ("search.txt", "answers use citations", "text/plain")},
+    )
+    uploaded_document = upload_response.json()
+    search_response = client.get("/search", params={"query": "ANSWERS"})
+
+    assert search_response.status_code == 200
+    assert search_response.json() == [
+        {
+            "document_id": uploaded_document["document_id"],
+            "chunk_id": uploaded_document["chunks"][0]["chunk_id"],
+            "chunk_index": 0,
+            "text": "answers use citations",
+        }
+    ]
+
+def test_search_no_matches() -> None:
+    upload_response = client.post(
+        "/documents",
+        files={"file": ("search.txt", "answers use citations", "text/plain")},
+    )
+    uploaded_document = upload_response.json()
+    search_response = client.get("/search", params={"query": "nonexistent query"})
+
+    assert search_response.status_code == 200
+    assert search_response.json() == []
