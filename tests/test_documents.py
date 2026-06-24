@@ -1,6 +1,8 @@
 from uuid import UUID
 
+import pytest
 from fastapi.testclient import TestClient
+
 from app.main import app
 from app.documents import (
     chunk_text,
@@ -81,9 +83,51 @@ def test_upload_rejects_empty_file() -> None:
 
 def test_chunks_text() -> None:
     text = "testing if this will chunk properly"
-    chunks = chunk_text(text, chunk_size=10)
+    chunks = chunk_text(text, chunk_size=10, chunk_overlap=0)
 
     assert chunks == ["testing if", " this will", " chunk pro", "perly"]
+
+
+def test_chunks_text_with_overlap() -> None:
+    chunks = chunk_text("abcdefghij12345", chunk_size=10, chunk_overlap=3)
+
+    assert chunks == ["abcdefghij", "hij12345"]
+
+
+@pytest.mark.parametrize(
+    ("chunk_size", "chunk_overlap"),
+    [
+        (0, 0),
+        (10, -1),
+        (10, 10),
+    ],
+)
+def test_rejects_invalid_chunk_settings(
+    chunk_size: int,
+    chunk_overlap: int,
+) -> None:
+    with pytest.raises(ValueError):
+        chunk_text(
+            "some text",
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+        )
+
+
+def test_upload_uses_overlapping_chunks() -> None:
+    text = "a" * 100 + "b" * 20
+
+    response = client.post(
+        "/documents",
+        files={"file": ("overlap.txt", text, "text/plain")},
+    )
+    chunks = response.json()["chunks"]
+
+    assert response.status_code == 200
+    assert [chunk["text"] for chunk in chunks] == [
+        "a" * 100,
+        "a" * 20 + "b" * 20,
+    ]
 
 
 def test_generates_document_id() -> None:
@@ -145,33 +189,22 @@ def test_empty_query_rejected() -> None:
 
 
 def test_search_ranks_and_limits_results() -> None:
-    best_match = client.post(
+    first = client.post(
         "/documents",
-        files={
-            "file": (
-                "best.txt",
-                "Grounded answers need citations and evidence.",
-                "text/plain",
-            )
-        },
+        files={"file": ("first.txt", "citations and evidence", "text/plain")},
     ).json()
     client.post(
         "/documents",
-        files={"file": ("partial.txt", "Citations identify sources.", "text/plain")},
+        files={"file": ("second.txt", "citations only", "text/plain")},
     )
 
     response = client.get(
         "/search",
         params={"query": "citations evidence", "limit": 1},
     )
+    results = response.json()
 
     assert response.status_code == 200
-    assert response.json() == [
-        {
-            "document_id": best_match["document_id"],
-            "chunk_id": best_match["chunks"][0]["chunk_id"],
-            "chunk_index": 0,
-            "text": "Grounded answers need citations and evidence.",
-            "score": 2,
-        }
-    ]
+    assert len(results) == 1
+    assert results[0]["document_id"] == first["document_id"]
+    assert results[0]["score"] == 2

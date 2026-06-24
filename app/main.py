@@ -62,7 +62,9 @@ async def upload_document(file: UploadFile = File(...)) -> DocumentUploadRespons
             chunk_index=index,
             text=chunk,
         )
-        for index, chunk in enumerate(chunk_text(text))
+        for index, chunk in enumerate(
+            chunk_text(text, chunk_size=100, chunk_overlap=20)
+        )
     ]
 
     response = DocumentUploadResponse(

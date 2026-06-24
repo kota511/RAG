@@ -6,8 +6,27 @@ def extract_text_from_bytes(contents: bytes) -> str:
     return contents.decode("utf-8")
 
 
-def chunk_text(text: str, chunk_size: int = 100) -> list[str]:
-    return [text[i : i + chunk_size] for i in range(0, len(text), chunk_size)]
+def chunk_text(
+    text: str,
+    chunk_size: int = 100,
+    chunk_overlap: int = 20,
+) -> list[str]:
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be greater than zero")
+    if chunk_overlap < 0 or chunk_overlap >= chunk_size:
+        raise ValueError("chunk_overlap must be between zero and chunk_size")
+
+    chunks: list[str] = []
+    step = chunk_size - chunk_overlap
+
+    for start in range(0, len(text), step):
+        chunk = text[start : start + chunk_size]
+        chunks.append(chunk)
+
+        if start + chunk_size >= len(text):
+            break
+
+    return chunks
 
 
 def generate_document_id() -> str:
