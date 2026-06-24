@@ -124,13 +124,18 @@ def test_search_chunks_case_insensitively() -> None:
         }
     ]
 
+
 def test_search_no_matches() -> None:
-    upload_response = client.post(
+    client.post(
         "/documents",
         files={"file": ("search.txt", "answers use citations", "text/plain")},
     )
-    uploaded_document = upload_response.json()
+
     search_response = client.get("/search", params={"query": "nonexistent query"})
 
     assert search_response.status_code == 200
     assert search_response.json() == []
+
+def test_empty_query_rejected() -> None:
+    response = client.get("/search", params={"query": ""})
+    assert response.status_code == 422
