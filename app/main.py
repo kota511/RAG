@@ -2,9 +2,10 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, File, HTTPException, Query, Response, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from qdrant_client import models
 
+from app.answers import AnswerSource, generate_answer
 from app.documents import (
     calculate_lexical_score,
     chunk_text,
@@ -21,6 +22,10 @@ from app.vector_store import (
 )
 
 qdrant_client = create_qdrant_client()
+
+INSUFFICIENT_CONTEXT_ANSWER = (
+    "I don't have enough information in the uploaded documents to answer that question."
+)
 
 
 @asynccontextmanager
@@ -67,6 +72,17 @@ class DocumentSummary(BaseModel):
     size_bytes: int
     character_count: int
     chunk_count: int
+
+
+class AnswerRequest(BaseModel):
+    question: str = Field(min_length=1)
+    limit: int = Field(default=5, ge=1, le=20)
+
+
+class AnswerResponse(BaseModel):
+    answer: str
+    insufficient_context: bool
+    citations: list[SearchResult]
 
 
 stored_documents: dict[str, DocumentUploadResponse] = {}
@@ -212,6 +228,10 @@ def semantic_search(
     query: str = Query(min_length=1),
     limit: int = Query(default=5, ge=1, le=20),
 ) -> list[SearchResult]:
+    return retrieve_semantic_results(query, limit)
+
+
+def retrieve_semantic_results(query: str, limit: int) -> list[SearchResult]:
     query_embedding = create_embeddings([query])[0]
     query_response = qdrant_client.query_points(
         collection_name=COLLECTION_NAME,
@@ -230,3 +250,54 @@ def semantic_search(
         )
         for point in query_response.points
     ]
+
+
+@app.post("/answers")
+def answer_question(request: AnswerRequest) -> AnswerResponse:
+    semantic_results = retrieve_semantic_results(
+        request.question,
+        request.limit,
+    )
+    if not semantic_results:
+        return insufficient_context_response()
+
+    generated_answer = generate_answer(
+        request.question,
+        [
+            AnswerSource(chunk_id=result.chunk_id, text=result.text)
+            for result in semantic_results
+        ],
+    )
+    if generated_answer is None:
+        raise HTTPException(status_code=502, detail="Answer generation failed")
+
+    if not generated_answer.has_sufficient_context:
+        return insufficient_context_response()
+
+    results_by_chunk_id = {
+        result.chunk_id: result
+        for result in semantic_results
+    }
+    cited_chunk_ids = list(dict.fromkeys(generated_answer.cited_chunk_ids))
+    if not cited_chunk_ids or any(
+        chunk_id not in results_by_chunk_id
+        for chunk_id in cited_chunk_ids
+    ):
+        raise HTTPException(status_code=502, detail="Answer contained invalid citations")
+
+    return AnswerResponse(
+        answer=generated_answer.answer,
+        insufficient_context=False,
+        citations=[
+            results_by_chunk_id[chunk_id]
+            for chunk_id in cited_chunk_ids
+        ],
+    )
+
+
+def insufficient_context_response() -> AnswerResponse:
+    return AnswerResponse(
+        answer=INSUFFICIENT_CONTEXT_ANSWER,
+        insufficient_context=True,
+        citations=[],
+    )

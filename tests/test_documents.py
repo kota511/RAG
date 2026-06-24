@@ -1,15 +1,19 @@
 from collections.abc import Iterator
+from unittest.mock import Mock
 from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
 from qdrant_client import QdrantClient, models
 
+from app.answers import AnswerSource, GeneratedAnswer
 from app.documents import (
     chunk_text,
     generate_document_id,
 )
 from app.main import (
+    INSUFFICIENT_CONTEXT_ANSWER,
+    SearchResult,
     app,
     stored_documents,
 )
@@ -421,3 +425,210 @@ def test_semantic_search_ranks_related_chunk_first(
             "score": pytest.approx(1.0),
         }
     ]
+
+
+def test_answers_returns_model_selected_citations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    semantic_results = [
+        SearchResult(
+            document_id="document-1",
+            chunk_id="document-1:0",
+            chunk_index=0,
+            text="Grounded answers use retrieved context.",
+            score=0.95,
+        ),
+        SearchResult(
+            document_id="document-2",
+            chunk_id="document-2:0",
+            chunk_index=0,
+            text="Citations identify supporting chunks.",
+            score=0.90,
+        ),
+    ]
+    retrieve_results = Mock(return_value=semantic_results)
+    generate = Mock(
+        return_value=GeneratedAnswer(
+            answer="Citations identify the supporting chunks.",
+            has_sufficient_context=True,
+            cited_chunk_ids=["document-2:0", "document-2:0"],
+        )
+    )
+    monkeypatch.setattr("app.main.retrieve_semantic_results", retrieve_results)
+    monkeypatch.setattr("app.main.generate_answer", generate)
+
+    response = client.post(
+        "/answers",
+        json={"question": "How do citations work?", "limit": 2},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "answer": "Citations identify the supporting chunks.",
+        "insufficient_context": False,
+        "citations": [
+            {
+                "document_id": "document-2",
+                "chunk_id": "document-2:0",
+                "chunk_index": 0,
+                "text": "Citations identify supporting chunks.",
+                "score": 0.90,
+            }
+        ],
+    }
+    retrieve_results.assert_called_once_with("How do citations work?", 2)
+    generate.assert_called_once_with(
+        "How do citations work?",
+        [
+            AnswerSource(
+                chunk_id="document-1:0",
+                text="Grounded answers use retrieved context.",
+            ),
+            AnswerSource(
+                chunk_id="document-2:0",
+                text="Citations identify supporting chunks.",
+            ),
+        ],
+    )
+
+
+def test_answers_skips_generation_without_retrieved_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.main.retrieve_semantic_results", lambda _query, _limit: [])
+    generate = Mock()
+    monkeypatch.setattr("app.main.generate_answer", generate)
+
+    response = client.post(
+        "/answers",
+        json={"question": "What is not documented?"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "answer": INSUFFICIENT_CONTEXT_ANSWER,
+        "insufficient_context": True,
+        "citations": [],
+    }
+    generate.assert_not_called()
+
+
+def test_answers_returns_insufficient_context_when_model_cannot_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.main.retrieve_semantic_results",
+        lambda _query, _limit: [
+            SearchResult(
+                document_id="document-1",
+                chunk_id="document-1:0",
+                chunk_index=0,
+                text="Unrelated context.",
+                score=0.20,
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        "app.main.generate_answer",
+        lambda _question, _sources: GeneratedAnswer(
+            answer="This answer must be discarded.",
+            has_sufficient_context=False,
+            cited_chunk_ids=["fabricated:0"],
+        ),
+    )
+
+    response = client.post(
+        "/answers",
+        json={"question": "What is not documented?"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "answer": INSUFFICIENT_CONTEXT_ANSWER,
+        "insufficient_context": True,
+        "citations": [],
+    }
+
+
+def test_answers_rejects_missing_structured_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.main.retrieve_semantic_results",
+        lambda _query, _limit: [
+            SearchResult(
+                document_id="document-1",
+                chunk_id="document-1:0",
+                chunk_index=0,
+                text="Grounded answers use context.",
+                score=0.95,
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        "app.main.generate_answer",
+        lambda _question, _sources: None,
+    )
+
+    response = client.post(
+        "/answers",
+        json={"question": "How are answers grounded?"},
+    )
+
+    assert response.status_code == 502
+    assert response.json() == {"detail": "Answer generation failed"}
+
+
+@pytest.mark.parametrize(
+    "cited_chunk_ids",
+    [
+        [],
+        ["fabricated:0"],
+    ],
+)
+def test_answers_rejects_invalid_citations(
+    monkeypatch: pytest.MonkeyPatch,
+    cited_chunk_ids: list[str],
+) -> None:
+    monkeypatch.setattr(
+        "app.main.retrieve_semantic_results",
+        lambda _query, _limit: [
+            SearchResult(
+                document_id="document-1",
+                chunk_id="document-1:0",
+                chunk_index=0,
+                text="Grounded answers use context.",
+                score=0.95,
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        "app.main.generate_answer",
+        lambda _question, _sources: GeneratedAnswer(
+            answer="Grounded answers use context.",
+            has_sufficient_context=True,
+            cited_chunk_ids=cited_chunk_ids,
+        ),
+    )
+
+    response = client.post(
+        "/answers",
+        json={"question": "How are answers grounded?"},
+    )
+
+    assert response.status_code == 502
+    assert response.json() == {"detail": "Answer contained invalid citations"}
+
+
+@pytest.mark.parametrize(
+    "request_body",
+    [
+        {"question": ""},
+        {"question": "Valid question", "limit": 0},
+        {"question": "Valid question", "limit": 21},
+    ],
+)
+def test_answers_rejects_invalid_request(request_body: dict[str, object]) -> None:
+    response = client.post("/answers", json=request_body)
+
+    assert response.status_code == 422
