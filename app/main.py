@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, Response, UploadFile
 from pydantic import BaseModel
 
 from app.documents import (
@@ -35,6 +35,15 @@ class DocumentSearchResponse(BaseModel):
     chunk_index: int
     text: str
     score: int
+
+
+class DocumentSummary(BaseModel):
+    document_id: str
+    filename: str | None
+    content_type: str | None
+    size_bytes: int
+    character_count: int
+    chunk_count: int
 
 
 stored_documents: dict[str, DocumentUploadResponse] = {}
@@ -80,6 +89,30 @@ async def upload_document(file: UploadFile = File(...)) -> DocumentUploadRespons
 
     stored_documents[document_id] = response
     return response
+
+
+@app.get("/documents")
+def list_documents() -> list[DocumentSummary]:
+    return [
+        DocumentSummary(
+            document_id=document.document_id,
+            filename=document.filename,
+            content_type=document.content_type,
+            size_bytes=document.size_bytes,
+            character_count=document.character_count,
+            chunk_count=document.chunk_count,
+        )
+        for document in stored_documents.values()
+    ]
+
+
+@app.delete("/documents/{document_id}", status_code=204)
+def delete_document(document_id: str) -> Response:
+    if document_id not in stored_documents:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    del stored_documents[document_id]
+    return Response(status_code=204)
 
 
 @app.get("/documents/{document_id}")

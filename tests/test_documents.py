@@ -3,15 +3,22 @@ from uuid import UUID
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
 from app.documents import (
     chunk_text,
     extract_text_from_bytes,
     generate_chunk_id,
     generate_document_id,
 )
+from app.main import app, stored_documents
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def clear_stored_documents() -> None:
+    stored_documents.clear()
+    yield
+    stored_documents.clear()
 
 
 def test_extracts_text() -> None:
@@ -148,6 +155,60 @@ def test_fetch_rejects_missing_document() -> None:
 
     assert response.status_code == 404
     assert response.json() == {"detail": "Document not found"}
+
+
+def test_lists_document_summaries() -> None:
+    uploaded = client.post(
+        "/documents",
+        files={"file": ("notes.txt", "rag test", "text/plain")},
+    ).json()
+
+    response = client.get("/documents")
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "document_id": uploaded["document_id"],
+            "filename": "notes.txt",
+            "content_type": "text/plain",
+            "size_bytes": 8,
+            "character_count": 8,
+            "chunk_count": 1,
+        }
+    ]
+
+
+def test_deletes_document() -> None:
+    uploaded = client.post(
+        "/documents",
+        files={"file": ("notes.txt", "rag test", "text/plain")},
+    ).json()
+
+    response = client.delete(f"/documents/{uploaded['document_id']}")
+
+    assert response.status_code == 204
+    assert response.content == b""
+    assert client.get(f"/documents/{uploaded['document_id']}").status_code == 404
+
+
+def test_delete_rejects_missing_document() -> None:
+    response = client.delete("/documents/nonexistent-id")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Document not found"}
+
+
+def test_deleted_document_is_not_searchable() -> None:
+    uploaded = client.post(
+        "/documents",
+        files={"file": ("notes.txt", "unique searchable phrase", "text/plain")},
+    ).json()
+
+    client.delete(f"/documents/{uploaded['document_id']}")
+    response = client.get("/search", params={"query": "unique"})
+
+    assert response.status_code == 200
+    assert response.json() == []
 
 
 def test_search_chunks_case_insensitively() -> None:
