@@ -1,3 +1,4 @@
+import re
 import uuid
 
 
@@ -15,3 +16,10 @@ def generate_document_id() -> str:
 
 def generate_chunk_id(document_id: str, chunk_index: int) -> str:
     return f"{document_id}:{chunk_index}"
+
+
+def calculate_lexical_score(query: str, text: str) -> int:
+    query_words = set(re.findall(r"\w+", query.casefold()))
+    text_words = set(re.findall(r"\w+", text.casefold()))
+
+    return len(query_words & text_words)

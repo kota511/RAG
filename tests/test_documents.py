@@ -121,6 +121,7 @@ def test_search_chunks_case_insensitively() -> None:
             "chunk_id": uploaded_document["chunks"][0]["chunk_id"],
             "chunk_index": 0,
             "text": "answers use citations",
+            "score": 1,
         }
     ]
 
@@ -136,6 +137,41 @@ def test_search_no_matches() -> None:
     assert search_response.status_code == 200
     assert search_response.json() == []
 
+
 def test_empty_query_rejected() -> None:
     response = client.get("/search", params={"query": ""})
+
     assert response.status_code == 422
+
+
+def test_search_ranks_and_limits_results() -> None:
+    best_match = client.post(
+        "/documents",
+        files={
+            "file": (
+                "best.txt",
+                "Grounded answers need citations and evidence.",
+                "text/plain",
+            )
+        },
+    ).json()
+    client.post(
+        "/documents",
+        files={"file": ("partial.txt", "Citations identify sources.", "text/plain")},
+    )
+
+    response = client.get(
+        "/search",
+        params={"query": "citations evidence", "limit": 1},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "document_id": best_match["document_id"],
+            "chunk_id": best_match["chunks"][0]["chunk_id"],
+            "chunk_index": 0,
+            "text": "Grounded answers need citations and evidence.",
+            "score": 2,
+        }
+    ]
