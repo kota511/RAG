@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, File, HTTPException, Query, Response, UploadFile
 from pydantic import BaseModel
+from qdrant_client import models
 
 from app.documents import (
     calculate_lexical_score,
@@ -11,8 +12,13 @@ from app.documents import (
     generate_chunk_id,
     generate_document_id,
 )
-from app.embeddings import cosine_similarity, create_embeddings
-from app.vector_store import create_qdrant_client, ensure_collection
+from app.embeddings import create_embeddings
+from app.vector_store import (
+    COLLECTION_NAME,
+    create_qdrant_client,
+    ensure_collection,
+    generate_point_id,
+)
 
 qdrant_client = create_qdrant_client()
 
@@ -64,7 +70,6 @@ class DocumentSummary(BaseModel):
 
 
 stored_documents: dict[str, DocumentUploadResponse] = {}
-stored_embeddings: dict[str, list[float]] = {}
 
 
 @app.get("/health")
@@ -107,13 +112,25 @@ async def upload_document(file: UploadFile = File(...)) -> DocumentUploadRespons
 
     embeddings = create_embeddings([chunk.text for chunk in chunks])
 
-    stored_documents[document_id] = response
-    stored_embeddings.update(
-        {
-            chunk.chunk_id: embedding
+    qdrant_client.upsert(
+        collection_name=COLLECTION_NAME,
+        points=[
+            models.PointStruct(
+                id=generate_point_id(chunk.chunk_id),
+                vector=embedding,
+                payload={
+                    "document_id": document_id,
+                    "chunk_id": chunk.chunk_id,
+                    "chunk_index": chunk.chunk_index,
+                    "text": chunk.text,
+                },
+            )
             for chunk, embedding in zip(chunks, embeddings)
-        }
+        ],
+        wait=True,
     )
+
+    stored_documents[document_id] = response
     return response
 
 
@@ -134,12 +151,21 @@ def list_documents() -> list[DocumentSummary]:
 
 @app.delete("/documents/{document_id}", status_code=204)
 def delete_document(document_id: str) -> Response:
-    document = stored_documents.get(document_id)
-    if document is None:
+    if document_id not in stored_documents:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    for chunk in document.chunks:
-        stored_embeddings.pop(chunk.chunk_id, None)
+    qdrant_client.delete(
+        collection_name=COLLECTION_NAME,
+        points_selector=models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="document_id",
+                    match=models.MatchValue(value=document_id),
+                )
+            ]
+        ),
+        wait=True,
+    )
 
     del stored_documents[document_id]
     return Response(status_code=204)
@@ -187,23 +213,20 @@ def semantic_search(
     limit: int = Query(default=5, ge=1, le=20),
 ) -> list[SearchResult]:
     query_embedding = create_embeddings([query])[0]
-    results: list[SearchResult] = []
+    query_response = qdrant_client.query_points(
+        collection_name=COLLECTION_NAME,
+        query=query_embedding,
+        limit=limit,
+        with_payload=True,
+    )
 
-    for document in stored_documents.values():
-        for chunk in document.chunks:
-            score = cosine_similarity(
-                query_embedding,
-                stored_embeddings[chunk.chunk_id],
-            )
-            results.append(
-                SearchResult(
-                    document_id=document.document_id,
-                    chunk_id=chunk.chunk_id,
-                    chunk_index=chunk.chunk_index,
-                    text=chunk.text,
-                    score=score,
-                )
-            )
-
-    results.sort(key=lambda result: result.score, reverse=True)
-    return results[:limit]
+    return [
+        SearchResult(
+            document_id=point.payload["document_id"],
+            chunk_id=point.payload["chunk_id"],
+            chunk_index=point.payload["chunk_index"],
+            text=point.payload["text"],
+            score=point.score,
+        )
+        for point in query_response.points
+    ]

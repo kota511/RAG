@@ -7,16 +7,18 @@ from qdrant_client import QdrantClient, models
 
 from app.documents import (
     chunk_text,
-    extract_text_from_bytes,
-    generate_chunk_id,
     generate_document_id,
 )
 from app.main import (
     app,
     stored_documents,
-    stored_embeddings,
 )
-from app.vector_store import COLLECTION_NAME, EMBEDDING_SIZE, ensure_collection
+from app.vector_store import (
+    COLLECTION_NAME,
+    EMBEDDING_SIZE,
+    ensure_collection,
+    generate_point_id,
+)
 
 client = TestClient(app)
 
@@ -29,7 +31,10 @@ def test_health_check_returns_ok() -> None:
 
 
 def fake_embeddings(texts: list[str]) -> list[list[float]]:
-    return [[1.0, 0.0] for _ in texts]
+    return [
+        [1.0] + [0.0] * (EMBEDDING_SIZE - 1)
+        for _ in texts
+    ]
 
 
 @pytest.fixture(autouse=True)
@@ -37,7 +42,6 @@ def reset_application_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[QdrantClient]:
     stored_documents.clear()
-    stored_embeddings.clear()
     monkeypatch.setattr("app.main.create_embeddings", fake_embeddings)
     test_qdrant_client = QdrantClient(":memory:")
     monkeypatch.setattr("app.main.qdrant_client", test_qdrant_client)
@@ -46,14 +50,16 @@ def reset_application_state(
         yield test_qdrant_client
 
     stored_documents.clear()
-    stored_embeddings.clear()
 
 
 def semantic_test_embeddings(texts: list[str]) -> list[list[float]]:
     vectors = {
-        "Grounded answers include citations.": [1.0, 0.0],
-        "Deployment uses containers.": [0.0, 1.0],
-        "how are sources referenced": [1.0, 0.0],
+        "Grounded answers include citations.": [1.0, 0.0]
+        + [0.0] * (EMBEDDING_SIZE - 2),
+        "Deployment uses containers.": [0.0, 1.0]
+        + [0.0] * (EMBEDDING_SIZE - 2),
+        "how are sources referenced": [1.0, 0.0]
+        + [0.0] * (EMBEDDING_SIZE - 2),
     }
     return [vectors[text] for text in texts]
 
@@ -84,10 +90,6 @@ def test_startup_configures_collection_without_recreating_it(
     assert vectors.size == EMBEDDING_SIZE
     assert vectors.distance == models.Distance.COSINE
     assert point_count == 1
-
-
-def test_extracts_text() -> None:
-    assert extract_text_from_bytes(b"rag test") == "rag test"
 
 
 def test_chunks_text() -> None:
@@ -133,8 +135,12 @@ def test_generates_document_id() -> None:
     UUID(document_id)
 
 
-def test_generates_chunk_id() -> None:
-    assert generate_chunk_id("document-123", 0) == "document-123:0"
+def test_generates_deterministic_point_id() -> None:
+    first = generate_point_id("document-123:0")
+    second = generate_point_id("document-123:0")
+
+    assert first == second
+    UUID(first)
 
 
 def test_upload_returns_metadata() -> None:
@@ -161,6 +167,32 @@ def test_upload_returns_metadata() -> None:
         ],
         "document_id": response_body["document_id"],
     }
+
+
+def test_upload_stores_chunk_point(
+    reset_application_state: QdrantClient,
+) -> None:
+    uploaded = client.post(
+        "/documents",
+        files={"file": ("notes.txt", "rag test", "text/plain")},
+    ).json()
+    chunk = uploaded["chunks"][0]
+
+    points = reset_application_state.retrieve(
+        collection_name=COLLECTION_NAME,
+        ids=[generate_point_id(chunk["chunk_id"])],
+        with_payload=True,
+        with_vectors=True,
+    )
+
+    assert len(points) == 1
+    assert points[0].payload == {
+        "document_id": uploaded["document_id"],
+        "chunk_id": chunk["chunk_id"],
+        "chunk_index": 0,
+        "text": "rag test",
+    }
+    assert points[0].vector == fake_embeddings(["rag test"])[0]
 
 
 def test_fetches_uploaded_document() -> None:
@@ -260,7 +292,7 @@ def test_delete_rejects_missing_document() -> None:
     assert response.json() == {"detail": "Document not found"}
 
 
-def test_deleted_document_is_not_searchable() -> None:
+def test_deleted_document_is_not_lexically_searchable() -> None:
     uploaded = client.post(
         "/documents",
         files={"file": ("notes.txt", "unique searchable phrase", "text/plain")},
@@ -271,6 +303,27 @@ def test_deleted_document_is_not_searchable() -> None:
 
     assert response.status_code == 200
     assert response.json() == []
+
+
+def test_deleted_document_is_not_semantically_searchable() -> None:
+    uploaded = client.post(
+        "/documents",
+        files={"file": ("notes.txt", "unique semantic phrase", "text/plain")},
+    ).json()
+
+    before_delete = client.get(
+        "/semantic-search",
+        params={"query": "related meaning"},
+    )
+    client.delete(f"/documents/{uploaded['document_id']}")
+    after_delete = client.get(
+        "/semantic-search",
+        params={"query": "related meaning"},
+    )
+
+    assert before_delete.json()[0]["document_id"] == uploaded["document_id"]
+    assert after_delete.status_code == 200
+    assert after_delete.json() == []
 
 
 def test_search_chunks_case_insensitively() -> None:
@@ -359,17 +412,12 @@ def test_semantic_search_ranks_related_chunk_first(
     results = response.json()
 
     assert response.status_code == 200
-    assert len(results) == 1
-    assert results[0]["document_id"] == citations_document["document_id"]
-
-
-def test_deleting_document_removes_embeddings() -> None:
-    uploaded = client.post(
-        "/documents",
-        files={"file": ("notes.txt", "rag test", "text/plain")},
-    ).json()
-    chunk_id = uploaded["chunks"][0]["chunk_id"]
-
-    client.delete(f"/documents/{uploaded['document_id']}")
-
-    assert chunk_id not in stored_embeddings
+    assert results == [
+        {
+            "document_id": citations_document["document_id"],
+            "chunk_id": citations_document["chunks"][0]["chunk_id"],
+            "chunk_index": 0,
+            "text": "Grounded answers include citations.",
+            "score": pytest.approx(1.0),
+        }
+    ]

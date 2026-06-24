@@ -1,4 +1,5 @@
 import os
+import uuid
 
 from qdrant_client import QdrantClient, models
 
@@ -20,3 +21,7 @@ def ensure_collection(client: QdrantClient) -> None:
                 distance=models.Distance.COSINE,
             ),
         )
+
+
+def generate_point_id(chunk_id: str) -> str:
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, chunk_id))
