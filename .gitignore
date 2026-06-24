@@ -5,3 +5,4 @@ __pycache__/
 .agents
 SETUP.md
 .coverage
+.vscode

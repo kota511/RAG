@@ -1,3 +1,6 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, File, HTTPException, Query, Response, UploadFile
 from pydantic import BaseModel
 
@@ -9,8 +12,21 @@ from app.documents import (
     generate_document_id,
 )
 from app.embeddings import cosine_similarity, create_embeddings
+from app.vector_store import create_qdrant_client, ensure_collection
 
-app = FastAPI(title="RAG API")
+qdrant_client = create_qdrant_client()
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    try:
+        ensure_collection(qdrant_client)
+        yield
+    finally:
+        qdrant_client.close()
+
+
+app = FastAPI(title="RAG API", lifespan=lifespan)
 
 
 class DocumentChunk(BaseModel):

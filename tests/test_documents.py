@@ -1,7 +1,9 @@
+from collections.abc import Iterator
 from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
+from qdrant_client import QdrantClient, models
 
 from app.documents import (
     chunk_text,
@@ -14,6 +16,7 @@ from app.main import (
     stored_documents,
     stored_embeddings,
 )
+from app.vector_store import COLLECTION_NAME, EMBEDDING_SIZE, ensure_collection
 
 client = TestClient(app)
 
@@ -32,12 +35,15 @@ def fake_embeddings(texts: list[str]) -> list[list[float]]:
 @pytest.fixture(autouse=True)
 def reset_application_state(
     monkeypatch: pytest.MonkeyPatch,
-):
+) -> Iterator[QdrantClient]:
     stored_documents.clear()
     stored_embeddings.clear()
     monkeypatch.setattr("app.main.create_embeddings", fake_embeddings)
+    test_qdrant_client = QdrantClient(":memory:")
+    monkeypatch.setattr("app.main.qdrant_client", test_qdrant_client)
 
-    yield
+    with client:
+        yield test_qdrant_client
 
     stored_documents.clear()
     stored_embeddings.clear()
@@ -50,6 +56,34 @@ def semantic_test_embeddings(texts: list[str]) -> list[list[float]]:
         "how are sources referenced": [1.0, 0.0],
     }
     return [vectors[text] for text in texts]
+
+
+def test_startup_configures_collection_without_recreating_it(
+    reset_application_state: QdrantClient,
+) -> None:
+    reset_application_state.upsert(
+        collection_name=COLLECTION_NAME,
+        points=[
+            models.PointStruct(
+                id=1,
+                vector=[1.0] * EMBEDDING_SIZE,
+            )
+        ],
+    )
+
+    ensure_collection(reset_application_state)
+
+    collection = reset_application_state.get_collection(COLLECTION_NAME)
+    vectors = collection.config.params.vectors
+    point_count = reset_application_state.count(
+        collection_name=COLLECTION_NAME,
+        exact=True,
+    ).count
+
+    assert isinstance(vectors, models.VectorParams)
+    assert vectors.size == EMBEDDING_SIZE
+    assert vectors.distance == models.Distance.COSINE
+    assert point_count == 1
 
 
 def test_extracts_text() -> None:
