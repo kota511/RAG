@@ -15,6 +15,9 @@ dependencies = [
 package = false
 
 [dependency-groups]
+benchmark = [
+    "datasets>=5.0.0",
+]
 dev = [
     "httpx2>=2.4.0",
     "pytest>=9.1.1",

@@ -1,6 +1,9 @@
 import re
 import uuid
 
+DEFAULT_CHUNK_SIZE = 100
+DEFAULT_CHUNK_OVERLAP = 20
+
 
 def extract_text_from_bytes(contents: bytes) -> str:
     return contents.decode("utf-8")
@@ -8,8 +11,8 @@ def extract_text_from_bytes(contents: bytes) -> str:
 
 def chunk_text(
     text: str,
-    chunk_size: int = 100,
-    chunk_overlap: int = 20,
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
+    chunk_overlap: int = DEFAULT_CHUNK_OVERLAP,
 ) -> list[str]:
     if chunk_size <= 0:
         raise ValueError("chunk_size must be greater than zero")
