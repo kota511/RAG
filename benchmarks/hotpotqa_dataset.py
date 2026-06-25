@@ -21,21 +21,12 @@ class BenchmarkDocument:
 
 
 @dataclass(frozen=True)
-class SupportingFact:
-    title: str
-    sentence_index: int
-    text: str
-
-
-@dataclass(frozen=True)
 class HotpotQACase:
     dataset_id: str
     question: str
     answer: str
-    question_type: str
-    level: str
     documents: tuple[BenchmarkDocument, ...]
-    supporting_facts: tuple[SupportingFact, ...]
+    supporting_document_titles: tuple[str, ...]
 
 
 def load_hotpotqa_cases(
@@ -94,33 +85,16 @@ def create_hotpotqa_case(row: Mapping[str, Any]) -> HotpotQACase:
             strict=True,
         )
     )
-    documents_by_title = {
-        document.title: document
-        for document in documents
-    }
-
-    supporting_facts_data = row["supporting_facts"]
-    supporting_facts = tuple(
-        SupportingFact(
-            title=title,
-            sentence_index=sentence_index,
-            text=documents_by_title[title].sentences[sentence_index],
-        )
-        for title, sentence_index in zip(
-            supporting_facts_data["title"],
-            supporting_facts_data["sent_id"],
-            strict=True,
-        )
+    supporting_document_titles = tuple(
+        dict.fromkeys(row["supporting_facts"]["title"])
     )
 
     return HotpotQACase(
         dataset_id=row["id"],
         question=row["question"],
         answer=row["answer"],
-        question_type=row["type"],
-        level=row["level"],
         documents=documents,
-        supporting_facts=supporting_facts,
+        supporting_document_titles=supporting_document_titles,
     )
 
 

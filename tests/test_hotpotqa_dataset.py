@@ -8,7 +8,6 @@ from benchmarks.hotpotqa_dataset import (
     DATASET_URL,
     BenchmarkDocument,
     HotpotQACase,
-    SupportingFact,
     create_hotpotqa_case,
     load_hotpotqa_cases,
     select_hotpotqa_cases,
@@ -30,8 +29,12 @@ def create_dataset_row(dataset_id: str) -> dict[str, object]:
             ],
         },
         "supporting_facts": {
-            "title": ["First document", "Second document"],
-            "sent_id": [1, 0],
+            "title": [
+                "First document",
+                "First document",
+                "Second document",
+            ],
+            "sent_id": [0, 1, 0],
         },
     }
 
@@ -43,8 +46,6 @@ def test_creates_case_with_supporting_sentence_text() -> None:
         dataset_id="case-1",
         question="Which fact connects the two documents?",
         answer="The shared fact",
-        question_type="bridge",
-        level="medium",
         documents=(
             BenchmarkDocument(
                 title="First document",
@@ -58,17 +59,9 @@ def test_creates_case_with_supporting_sentence_text() -> None:
                 sentences=("The second supporting sentence.",),
             ),
         ),
-        supporting_facts=(
-            SupportingFact(
-                title="First document",
-                sentence_index=1,
-                text="The first supporting sentence.",
-            ),
-            SupportingFact(
-                title="Second document",
-                sentence_index=0,
-                text="The second supporting sentence.",
-            ),
+        supporting_document_titles=(
+            "First document",
+            "Second document",
         ),
     )
 

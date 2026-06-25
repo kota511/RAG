@@ -1,0 +1,77 @@
+{
+  "generated_at": "2026-06-25T11:59:52.891029+00:00",
+  "config": {
+    "dataset_repository": "hotpotqa/hotpot_qa",
+    "dataset_revision": "1908d6afbbead072334abe2965f91bd2709910ab",
+    "dataset_file_path": "distractor/validation-00000-of-00001.parquet",
+    "selection_seed": 5114,
+    "case_count": 1,
+    "retrieval_limit": 5,
+    "embedding_model": "text-embedding-3-small",
+    "chunk_size": 100,
+    "chunk_overlap": 20
+  },
+  "aggregate": {
+    "limit": 5,
+    "case_count": 1,
+    "mean_supporting_document_recall": 1.0,
+    "complete_support_rate": 1.0,
+    "mean_reciprocal_rank": 1.0
+  },
+  "cases": [
+    {
+      "dataset_id": "5add63845542992ae4cec541",
+      "question": "What was the release date and price for the release of Mac OS X that has the software for creating WWF files?",
+      "expected_answer": "April 29, 2005 for US$129.95",
+      "supporting_document_titles": [
+        "WWF (file format)",
+        "Mac OS X Tiger"
+      ],
+      "metrics": {
+        "limit": 5,
+        "supporting_document_count": 2,
+        "matched_supporting_document_count": 2,
+        "supporting_document_recall": 1.0,
+        "complete_support": true,
+        "reciprocal_rank": 1.0
+      },
+      "retrieved_chunks": [
+        {
+          "rank": 1,
+          "document_title": "WWF (file format)",
+          "chunk_index": 7,
+          "score": 0.63628775662582,
+          "text": "pen ordinary PDF files. At present, the software for creating WWF files is available for Mac OS X 10"
+        },
+        {
+          "rank": 2,
+          "document_title": "Mac OS X 10.0",
+          "chunk_index": 2,
+          "score": 0.5556903443938861,
+          "text": "erating system. Mac OS X 10.0 was released on March 24, 2001 for a price of US$129. It was the succe"
+        },
+        {
+          "rank": 3,
+          "document_title": "Mac OS X 10.1",
+          "chunk_index": 3,
+          "score": 0.5439351258604102,
+          "text": "on September 25, 2001 as a free update for Mac OS X 10.0 users."
+        },
+        {
+          "rank": 4,
+          "document_title": "Mac OS X Tiger",
+          "chunk_index": 2,
+          "score": 0.5317933122105252,
+          "text": "r was released to the public on April 29, 2005 for US$129.95 as the successor to Mac OS X 10.3 Panth"
+        },
+        {
+          "rank": 5,
+          "document_title": "WWF (file format)",
+          "chunk_index": 0,
+          "score": 0.5269008718467398,
+          "text": "WWF (file format)\nWWF is a modification of the open standard PDF format for document exchange endors"
+        }
+      ]
+    }
+  ]
+}
