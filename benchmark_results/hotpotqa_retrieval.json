@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-06-25T11:59:52.891029+00:00",
+  "generated_at": "2026-06-25T14:13:03.158232+00:00",
   "config": {
     "dataset_repository": "hotpotqa/hotpot_qa",
     "dataset_revision": "1908d6afbbead072334abe2965f91bd2709910ab",
@@ -61,7 +61,7 @@
           "rank": 4,
           "document_title": "Mac OS X Tiger",
           "chunk_index": 2,
-          "score": 0.5317933122105252,
+          "score": 0.5317195406480241,
           "text": "r was released to the public on April 29, 2005 for US$129.95 as the successor to Mac OS X 10.3 Panth"
         },
         {

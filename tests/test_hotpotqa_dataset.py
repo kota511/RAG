@@ -39,7 +39,7 @@ def create_dataset_row(dataset_id: str) -> dict[str, object]:
     }
 
 
-def test_creates_case_with_supporting_sentence_text() -> None:
+def test_creates_case_with_unique_supporting_document_titles() -> None:
     case = create_hotpotqa_case(create_dataset_row("case-1"))
 
     assert case == HotpotQACase(

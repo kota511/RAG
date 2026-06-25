@@ -132,7 +132,6 @@ def evaluate_retrieval_case(
 
 def create_report(
     results: list[RetrievalCaseResult],
-    limit: int,
 ) -> dict[str, object]:
     aggregate = aggregate_retrieval_metrics(
         [result.metrics for result in results]
@@ -145,7 +144,7 @@ def create_report(
             "dataset_file_path": DATASET_FILE_PATH,
             "selection_seed": DEFAULT_SELECTION_SEED,
             "case_count": len(results),
-            "retrieval_limit": limit,
+            "retrieval_limit": aggregate.limit,
             "embedding_model": EMBEDDING_MODEL,
             "chunk_size": DEFAULT_CHUNK_SIZE,
             "chunk_overlap": DEFAULT_CHUNK_OVERLAP,
@@ -207,7 +206,7 @@ def main() -> None:
             f"mrr@{args.limit}={metrics.reciprocal_rank:.3f}"
         )
 
-    report = create_report(results, limit=args.limit)
+    report = create_report(results)
     aggregate = report["aggregate"]
     print(
         f"Aggregate over {aggregate['case_count']} case(s): "

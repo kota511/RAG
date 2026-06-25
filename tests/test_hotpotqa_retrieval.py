@@ -106,7 +106,7 @@ def test_writes_json_report(tmp_path: Path) -> None:
         metrics=RetrievalMetrics(5, 1, 1, 1.0, True, 1.0),
         retrieved_chunks=(),
     )
-    report = create_report([case_result], limit=5)
+    report = create_report([case_result])
     output_path = tmp_path / "report.json"
 
     write_report(report, output_path)
