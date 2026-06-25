@@ -50,7 +50,7 @@ def test_generates_structured_answer(monkeypatch: pytest.MonkeyPatch) -> None:
             }
         ),
         text_format=GeneratedAnswer,
-        verbosity="low",
+        text={"verbosity": "low"},
         store=False,
     )
 

@@ -43,7 +43,7 @@ def generate_answer(
             }
         ),
         text_format=GeneratedAnswer,
-        verbosity="low",
+        text={"verbosity": "low"},
         store=False,
     )
 
