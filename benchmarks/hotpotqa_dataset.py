@@ -10,7 +10,7 @@ DATASET_URL = (
     f"https://huggingface.co/datasets/{DATASET_REPOSITORY}/resolve/"
     f"{DATASET_REVISION}/{DATASET_FILE_PATH}"
 )
-DEFAULT_CASE_COUNT = 50
+BASELINE_CASE_COUNT = 200
 DEFAULT_SELECTION_SEED = 5114
 
 
@@ -30,7 +30,7 @@ class HotpotQACase:
 
 
 def load_hotpotqa_cases(
-    count: int = DEFAULT_CASE_COUNT,
+    count: int,
     seed: int = DEFAULT_SELECTION_SEED,
 ) -> list[HotpotQACase]:
     try:
@@ -99,7 +99,7 @@ def create_hotpotqa_case(row: Mapping[str, Any]) -> HotpotQACase:
 
 
 def main() -> None:
-    cases = load_hotpotqa_cases()
+    cases = load_hotpotqa_cases(count=BASELINE_CASE_COUNT)
     print(
         f"Loaded {len(cases)} deterministic HotpotQA cases "
         f"from revision {DATASET_REVISION}."

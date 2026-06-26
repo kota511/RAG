@@ -17,6 +17,7 @@ from app.vector_store import (
 )
 from benchmarks.hotpotqa_chunks import prepare_case_documents
 from benchmarks.hotpotqa_dataset import (
+    BASELINE_CASE_COUNT,
     DATASET_FILE_PATH,
     DATASET_REPOSITORY,
     DATASET_REVISION,
@@ -170,7 +171,10 @@ def main() -> None:
         "--count",
         type=int,
         default=1,
-        help="Number of cases to run; defaults to 1 to limit API usage.",
+        help=(
+            "Number of cases to run; defaults to 1 to limit API usage. "
+            f"Use {BASELINE_CASE_COUNT} for the comparison baseline."
+        ),
     )
     parser.add_argument(
         "--limit",

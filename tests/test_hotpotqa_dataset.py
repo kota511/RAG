@@ -107,6 +107,11 @@ def test_loads_pinned_validation_file(
     )
 
 
+def test_requires_explicit_case_count() -> None:
+    with pytest.raises(TypeError, match="count"):
+        load_hotpotqa_cases()
+
+
 @pytest.mark.parametrize("count", [0, 5])
 def test_rejects_invalid_case_count(count: int) -> None:
     rows = [create_dataset_row("case-1")]
