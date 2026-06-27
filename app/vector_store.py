@@ -23,5 +23,11 @@ def ensure_collection(client: QdrantClient) -> None:
         )
 
 
+def reset_collection(client: QdrantClient) -> None:
+    if client.collection_exists(COLLECTION_NAME):
+        client.delete_collection(COLLECTION_NAME)
+    ensure_collection(client)
+
+
 def generate_point_id(chunk_id: str) -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_URL, chunk_id))

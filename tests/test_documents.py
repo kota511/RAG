@@ -22,6 +22,7 @@ from app.vector_store import (
     EMBEDDING_SIZE,
     ensure_collection,
     generate_point_id,
+    reset_collection,
 )
 
 client = TestClient(app)
@@ -68,7 +69,7 @@ def semantic_test_embeddings(texts: list[str]) -> list[list[float]]:
     return [vectors[text] for text in texts]
 
 
-def test_startup_configures_collection_without_recreating_it(
+def test_ensure_collection_keeps_existing_points(
     reset_application_state: QdrantClient,
 ) -> None:
     reset_application_state.upsert(
@@ -94,6 +95,27 @@ def test_startup_configures_collection_without_recreating_it(
     assert vectors.size == EMBEDDING_SIZE
     assert vectors.distance == models.Distance.COSINE
     assert point_count == 1
+
+
+def test_reset_collection_removes_stale_points(
+    reset_application_state: QdrantClient,
+) -> None:
+    reset_application_state.upsert(
+        collection_name=COLLECTION_NAME,
+        points=[
+            models.PointStruct(
+                id=1,
+                vector=[1.0] * EMBEDDING_SIZE,
+            )
+        ],
+    )
+
+    reset_collection(reset_application_state)
+
+    assert reset_application_state.count(
+        collection_name=COLLECTION_NAME,
+        exact=True,
+    ).count == 0
 
 
 def test_chunks_text() -> None:
@@ -230,6 +252,30 @@ def test_upload_rejects_empty_file() -> None:
 
     assert response.status_code == 400
     assert response.json() == {"detail": "File is empty"}
+
+
+def test_upload_rejects_invalid_utf8() -> None:
+    response = client.post(
+        "/documents",
+        files={"file": ("bad.txt", b"\xff", "text/plain")},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "File must be valid UTF-8"}
+
+
+def test_upload_rejects_embedding_count_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.main.create_embeddings", lambda _texts: [])
+
+    response = client.post(
+        "/documents",
+        files={"file": ("notes.txt", "rag test", "text/plain")},
+    )
+
+    assert response.status_code == 502
+    assert response.json() == {"detail": "Embedding count mismatch"}
 
 
 def test_upload_uses_overlapping_chunks() -> None:

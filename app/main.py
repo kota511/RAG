@@ -17,8 +17,8 @@ from app.embeddings import create_embeddings
 from app.vector_store import (
     COLLECTION_NAME,
     create_qdrant_client,
-    ensure_collection,
     generate_point_id,
+    reset_collection,
 )
 
 qdrant_client = create_qdrant_client()
@@ -31,7 +31,8 @@ INSUFFICIENT_CONTEXT_ANSWER = (
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     try:
-        ensure_collection(qdrant_client)
+        stored_documents.clear()
+        reset_collection(qdrant_client)
         yield
     finally:
         qdrant_client.close()
@@ -99,7 +100,10 @@ async def upload_document(file: UploadFile = File(...)) -> DocumentUploadRespons
         raise HTTPException(status_code=415, detail="Unsupported file type")
 
     contents = await file.read()
-    text = extract_text_from_bytes(contents)
+    try:
+        text = extract_text_from_bytes(contents)
+    except UnicodeDecodeError as error:
+        raise HTTPException(status_code=400, detail="File must be valid UTF-8") from error
     if len(text) == 0:
         raise HTTPException(status_code=400, detail="File is empty")
 
@@ -127,6 +131,8 @@ async def upload_document(file: UploadFile = File(...)) -> DocumentUploadRespons
     )
 
     embeddings = create_embeddings([chunk.text for chunk in chunks])
+    if len(embeddings) != len(chunks):
+        raise HTTPException(status_code=502, detail="Embedding count mismatch")
 
     qdrant_client.upsert(
         collection_name=COLLECTION_NAME,
